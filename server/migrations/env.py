@@ -1,75 +1,63 @@
 from __future__ import with_statement
-
 import logging
 from logging.config import fileConfig
-
-from flask import current_app
-
+from flask import Flask, request, session, jsonify, current_app
 from alembic import context
+from models import User  # Ensure User model is imported
 
-# this is the Alembic Config object, which provides
-# access to the values within the .ini file in use.
+# Initialize Flask app
+app = Flask(__name__)
+app.secret_key = "your_secret_key_here"  # Set a secret key for session security
+
+# Alembic config
 config = context.config
-
-# Interpret the config file for Python logging.
-# This line sets up loggers basically.
 fileConfig(config.config_file_name)
 logger = logging.getLogger('alembic.env')
 
-# add your model's MetaData object here
-# for 'autogenerate' support
-# from myapp import mymodel
-# target_metadata = mymodel.Base.metadata
 config.set_main_option(
     'sqlalchemy.url',
-    str(current_app.extensions['migrate'].db.get_engine().url).replace(
-        '%', '%%'))
+    str(current_app.extensions['migrate'].db.get_engine().url).replace('%', '%%')
+)
 target_db = current_app.extensions['migrate'].db
 
-# other values from the config, defined by the needs of env.py,
-# can be acquired:
-# my_important_option = config.get_main_option("my_important_option")
-# ... etc.
-
-
 def get_metadata():
-    if hasattr(target_db, 'metadatas'):
-        return target_db.metadatas[None]
-    return target_db.metadata
+    return target_db.metadatas.get(None, target_db.metadata)
 
+@app.route("/login", methods=["POST"])
+def login():
+    data = request.get_json()
+    username = data.get("username")
+
+    user = User.query.filter_by(username=username).first()
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+
+    session["user_id"] = user.id
+    return jsonify({"message": f"Welcome, {user.username}!"}), 200
+
+@app.route("/logout", methods=["DELETE"])
+def logout():
+    session.pop("user_id", None)
+    return jsonify({"message": "Logged out successfully"}), 204
+
+@app.route("/check_session", methods=["GET"])
+def check_session():
+    user_id = session.get("user_id")
+    if user_id:
+        user = User.query.get(user_id)
+        return jsonify({"username": user.username}), 200
+    return jsonify({"error": "Unauthorized"}), 401
 
 def run_migrations_offline():
-    """Run migrations in 'offline' mode.
-
-    This configures the context with just a URL
-    and not an Engine, though an Engine is acceptable
-    here as well.  By skipping the Engine creation
-    we don't even need a DBAPI to be available.
-
-    Calls to context.execute() here emit the given string to the
-    script output.
-
-    """
+    """Run migrations in 'offline' mode."""
     url = config.get_main_option("sqlalchemy.url")
-    context.configure(
-        url=url, target_metadata=get_metadata(), literal_binds=True
-    )
+    context.configure(url=url, target_metadata=get_metadata(), literal_binds=True)
 
     with context.begin_transaction():
         context.run_migrations()
 
-
 def run_migrations_online():
-    """Run migrations in 'online' mode.
-
-    In this scenario we need to create an Engine
-    and associate a connection with the context.
-
-    """
-
-    # this callback is used to prevent an auto-migration from being generated
-    # when there are no changes to the schema
-    # reference: http://alembic.zzzcomputing.com/en/latest/cookbook.html
+    """Run migrations in 'online' mode."""
     def process_revision_directives(context, revision, directives):
         if getattr(config.cmd_opts, 'autogenerate', False):
             script = directives[0]
@@ -89,7 +77,6 @@ def run_migrations_online():
 
         with context.begin_transaction():
             context.run_migrations()
-
 
 if context.is_offline_mode():
     run_migrations_offline()
